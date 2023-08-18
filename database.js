@@ -19,9 +19,13 @@ const run = (query, parameters = []) => {
 }
 module.exports.run = run;
 
-const all = (query) => {
+/**
+ * Changes: Added a parameter to ensure that the SQL statements are 
+ * prepared using placeholders to prevent SQL injection.
+ */
+const all = (query, parameters = []) => {
   return new Promise((resolve, reject) => {
-    db.all(query, (err, results) => {
+    db.all(query,parameters, (err, results) => {
       if (err) {
         reject(err)
       } else {
