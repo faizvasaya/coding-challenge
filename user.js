@@ -45,16 +45,40 @@ const search = async (req, res) => {
   const query = req.params.query;
   const userId = parseInt(req.params.userId);
 
-  db.all(`SELECT id, name, id in (SELECT friendId from Friends where userId = ${userId}) as connection from Users where name LIKE '${query}%' LIMIT 20;`).then((results) => {
+  try {
+    const results = await db.all(
+      `
+      SELECT
+      id,
+      name,
+      CASE
+          WHEN id IN (
+              SELECT f1.friendId
+              FROM Friends AS f1
+              WHERE f1.userId = ?
+          ) THEN 1
+          WHEN id IN (
+              SELECT f2.friendId
+              FROM Friends AS f1
+              JOIN Friends AS f2 ON f1.friendId = f2.userId
+              WHERE f1.userId = ?
+          ) THEN 2
+          ELSE 0
+      END AS connection
+      FROM Users
+      WHERE name LIKE ?
+      LIMIT 20;
+      `
+    , [userId, userId, `${query}%`]);
     res.statusCode = 200;
     res.json({
       success: true,
       users: results
     });
-  }).catch((err) => {
+  } catch(err) {
     res.statusCode = 500;
     res.json({ success: false, error: err });
-  });
+  }
 }
 module.exports.search = search;
 
@@ -77,6 +101,7 @@ const friend = async (req, res) =>{
     res.statusCode = 500;
     res.json({
       success: false,
+      error: err
     });
   }
 }
@@ -101,6 +126,7 @@ const unFriend = async (req, res) =>{
     res.statusCode = 500;
     res.json({
       success: false,
+      error: err
     });
   }
 }
