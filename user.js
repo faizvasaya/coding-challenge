@@ -65,13 +65,26 @@ const friend = async (req, res) =>{
   console.log(`userId: ${userId}`);
   console.log(`friendId: ${friendId}`);
 
-  db.run(`INSERT INTO Friends (userId, friendId) VALUES (?, ?);`, [userId, friendId]).then(()=>{
+  try{
+    await db.run('BEGIN TRANSACTION;');
+      await db.run(`INSERT INTO Friends (userId, friendId) VALUES (?, ?);`, [userId, friendId]);
+      await db.run(`INSERT INTO Friends (userId, friendId) VALUES (?, ?);`, [friendId, userId]);
+    await db.run('COMMIT;');
     res.statusCode = 200;
     res.json({
       success: true,
       userId,
       friendId
     });
-  });
+  }catch(error) {
+    await db.run('ROLLBACK;');
+    console.error(error);
+    res.statusCode = 500;
+    res.json({
+      success: true,
+      userId,
+      friendId
+    });
+  }
 }
 module.exports.friend = friend;
