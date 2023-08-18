@@ -57,3 +57,21 @@ const search = async (req, res) => {
   });
 }
 module.exports.search = search;
+
+const friend = async (req, res) =>{
+  const userId = parseInt(req.params.userId);
+  const friendId = parseInt(req.params.friendId);
+
+  console.log(`userId: ${userId}`);
+  console.log(`friendId: ${friendId}`);
+
+  db.run(`INSERT INTO Friends (userId, friendId) VALUES (?, ?);`, [userId, friendId]).then(()=>{
+    res.statusCode = 200;
+    res.json({
+      success: true,
+      userId,
+      friendId
+    });
+  });
+}
+module.exports.friend = friend;

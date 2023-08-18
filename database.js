@@ -2,9 +2,13 @@ const sqlite3 = require('sqlite3');
 
 const db = new sqlite3.Database(':memory:');
 
-const run = (query) => {
+/**
+ * Changes: Added a parameter to ensure that the SQL statements are 
+ * prepared using placeholders to prevent SQL injection.
+ */
+const run = (query, parameters = []) => {
   return new Promise((resolve, reject) => {
-    db.run(query, (err, results) => {
+    db.run(query, parameters, (err, results) => {
       if (err) {
         reject(err)
       } else {
