@@ -62,9 +62,6 @@ const friend = async (req, res) =>{
   const userId = parseInt(req.params.userId);
   const friendId = parseInt(req.params.friendId);
 
-  console.log(`userId: ${userId}`);
-  console.log(`friendId: ${friendId}`);
-
   try{
     await db.run('BEGIN TRANSACTION;');
       await db.run(`INSERT INTO Friends (userId, friendId) VALUES (?, ?);`, [userId, friendId]);
@@ -73,18 +70,38 @@ const friend = async (req, res) =>{
     res.statusCode = 200;
     res.json({
       success: true,
-      userId,
-      friendId
     });
   }catch(error) {
     await db.run('ROLLBACK;');
     console.error(error);
     res.statusCode = 500;
     res.json({
-      success: true,
-      userId,
-      friendId
+      success: false,
     });
   }
 }
 module.exports.friend = friend;
+
+const unFriend = async (req, res) =>{
+  const userId = parseInt(req.params.userId);
+  const friendId = parseInt(req.params.friendId);
+
+  try{
+    await db.run('BEGIN TRANSACTION;');
+      await db.run(`DELETE FROM Friends WHERE userId = ? AND friendId = ?;`, [userId, friendId]);
+      await db.run(`DELETE FROM Friends WHERE userId = ? AND friendId = ?;`, [friendId, userId]);
+    await db.run('COMMIT;');
+    res.statusCode = 200;
+    res.json({
+      success: true,
+    });
+  }catch(error) {
+    await db.run('ROLLBACK;');
+    console.error(error);
+    res.statusCode = 500;
+    res.json({
+      success: false,
+    });
+  }
+}
+module.exports.unFriend = unFriend;

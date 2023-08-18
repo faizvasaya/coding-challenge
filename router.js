@@ -8,4 +8,6 @@ router.get('/search/:userId/:query', user.search);
 
 router.get('/friend/:userId/:friendId', user.friend);
 
+router.get('/unfriend/:userId/:friendId', user.unFriend);
+
 module.exports = router;
