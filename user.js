@@ -96,8 +96,7 @@ const friend = async (req, res) =>{
 
   try{
     await db.run('BEGIN TRANSACTION;');
-      await db.run(`INSERT INTO Friends (userId, friendId) VALUES (?, ?);`, [userId, friendId]);
-      await db.run(`INSERT INTO Friends (userId, friendId) VALUES (?, ?);`, [friendId, userId]);
+      await db.run(`INSERT INTO Friends (userId, friendId) VALUES (?, ?), (?, ?);`, [userId, friendId, friendId, userId]);
     await db.run('COMMIT;');
     res.statusCode = 200;
     res.json({
