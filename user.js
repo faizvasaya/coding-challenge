@@ -3,6 +3,11 @@ const db = require('./database');
 const init = async () => {
   await db.run('CREATE TABLE Users (id INTEGER PRIMARY KEY AUTOINCREMENT, name varchar(32));');
   await db.run('CREATE TABLE Friends (id INTEGER PRIMARY KEY AUTOINCREMENT, userId int, friendId int);');
+  // Created B-tree Index for efficient 1st and 2nd connection search
+  await db.run('CREATE INDEX idx_friends_userId_friendId ON Friends(userId, friendId);');
+  // Created B-tree Index for efficient name based search
+  await db.run('CREATE INDEX idx_users_name ON Users(name);');
+
   const users = [];
   const names = ['foo', 'bar', 'baz'];
   for (i = 0; i < 27000; ++i) {
