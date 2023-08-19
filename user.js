@@ -46,6 +46,13 @@ const init = async () => {
 }
 module.exports.init = init;
 
+/**
+ * Question 3: I tried extending the below query for 3rd and 4th connection, however
+ * this degraded the performance as we had to join the same table for two more times.
+ * Moreover, it also required multiple levels of sub-queries which makes this approach
+ * not scalable for multiple levels of friendship connections. However this does provide
+ * good performance for 1st and 2nd level connections
+ */
 const search = async (req, res) => {
   const query = req.params.query;
   const userId = parseInt(req.params.userId);
