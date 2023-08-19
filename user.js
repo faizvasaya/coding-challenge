@@ -53,25 +53,21 @@ const search = async (req, res) => {
   try {
     const results = await db.all(
       `
-      SELECT
-      id,
-      name,
-      CASE
-          WHEN id IN (
-              SELECT f1.friendId
-              FROM Friends AS f1
-              WHERE f1.userId = ?
-          ) THEN 1
-          WHEN id IN (
-              SELECT f2.friendId
-              FROM Friends AS f1
-              JOIN Friends AS f2 ON f1.friendId = f2.userId
-              WHERE f1.userId = ?
-          ) THEN 2
-          ELSE 0
-      END AS connection
-      FROM Users
-      WHERE name LIKE ?
+      SELECT u.id, u.name,
+      MIN(
+          CASE
+              WHEN firstLevel.friendId IS NOT NULL THEN 1
+              WHEN secondLevel.friendId IS NOT NULL THEN 2
+              ELSE 0
+          END
+      ) AS connection
+      FROM Users u
+      LEFT JOIN Friends firstLevel ON u.id = firstLevel.friendId AND firstLevel.userId = ?
+      LEFT JOIN Friends secondLevel ON u.id = secondLevel.friendId AND secondLevel.userId IN (
+        SELECT friendId FROM Friends WHERE userId = ?
+      )
+      WHERE u.name LIKE ?
+      GROUP BY u.id, u.name
       LIMIT 20;
       `
     , [userId, userId, `${query}%`]);
