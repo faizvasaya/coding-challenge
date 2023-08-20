@@ -1,11 +1,21 @@
 const db = require('./database');
 
 const init = async () => {
-  await db.run('CREATE TABLE Users (id INTEGER PRIMARY KEY AUTOINCREMENT, name varchar(32));');
-  await db.run('CREATE TABLE Friends (id INTEGER PRIMARY KEY AUTOINCREMENT, userId int, friendId int);');
-  // Created B-tree Index for efficient 1st and 2nd connection search
+  // @change: Added a NOT NULL constraint for the name column of Users table
+  await db.run('CREATE TABLE Users (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(32) NOT NULL);');
+  // @change: Modified the Friends table to add constraints
+  await db.run(`
+    CREATE TABLE Friends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId INT,
+      friendId INT,
+      UNIQUE (userId, friendId),
+      FOREIGN KEY (userId) REFERENCES Users(id),
+      FOREIGN KEY (friendId) REFERENCES Users(id)
+    );`);
+  // @change: Created B-tree Index for efficient 1st and 2nd level connection search
   await db.run('CREATE INDEX idx_friends_userId_friendId ON Friends(userId, friendId);');
-  // Created B-tree Index for efficient name based search
+  // @change: Created B-tree Index for efficient name based search
   await db.run('CREATE INDEX idx_users_name ON Users(name);');
 
   const users = [];
@@ -47,11 +57,8 @@ const init = async () => {
 module.exports.init = init;
 
 /**
- * Question 3: I tried extending the below query for 3rd and 4th connection, however
- * this degraded the performance as we had to join the same table for two more times.
- * Moreover, it also required multiple levels of sub-queries which makes this approach
- * not scalable for multiple levels of friendship connections. However this does provide
- * good performance for 1st and 2nd level connections
+ * 
+ * @change: Modified the search query for 1st and 2nd level connections
  */
 const search = async (req, res) => {
   const query = req.params.query;
@@ -90,6 +97,7 @@ const search = async (req, res) => {
 }
 module.exports.search = search;
 
+// @change: Added route for Add Friend
 const friend = async (req, res) =>{
   const userId = parseInt(req.params.userId);
   const friendId = parseInt(req.params.friendId);
@@ -114,14 +122,17 @@ const friend = async (req, res) =>{
 }
 module.exports.friend = friend;
 
+// @change: Added route to Remove Friend
 const unFriend = async (req, res) =>{
   const userId = parseInt(req.params.userId);
   const friendId = parseInt(req.params.friendId);
 
   try{
     await db.run('BEGIN TRANSACTION;');
-      await db.run(`DELETE FROM Friends WHERE userId = ? AND friendId = ?;`, [userId, friendId]);
-      await db.run(`DELETE FROM Friends WHERE userId = ? AND friendId = ?;`, [friendId, userId]);
+      await db.run(`
+        DELETE FROM Friends 
+        WHERE (userId = ? AND friendId = ?) OR (userId = ? AND friendId = ?);
+    `, [userId, friendId, friendId, userId]);
     await db.run('COMMIT;');
     res.statusCode = 200;
     res.json({
