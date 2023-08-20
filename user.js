@@ -44,7 +44,7 @@ const init = async () => {
 
   const users = [];
   const names = ['foo', 'bar', 'baz'];
-  // @change: Changed it to 1000 for testing 3rd and 4th level connection. The queries did not perform well when increased
+  // @change: Changed it to 1000 for testing 3rd and 4th level connection, worked okay. The queries did not perform well when increased
   // to 27000 for 3rd and 4th connection
   for (i = 0; i < 1000; ++i) {
     let n = i;
@@ -86,18 +86,18 @@ const init = async () => {
   `);
 
   await db.run(`
-    WITH RECURSIVE PopulateClosure AS (
+    WITH RECURSIVE PopulateFriendsClosure AS (
       SELECT userId, friendId, 1 AS depth
       FROM Friends
       UNION ALL
       SELECT pc.userId, ft.friendId, pc.depth + 1
-      FROM PopulateClosure pc
+      FROM PopulateFriendsClosure pc
       JOIN Friends ft ON pc.userId = ft.friendId
       WHERE pc.depth < 4 AND pc.userId != pc.friendId 
     )
     INSERT INTO FriendsClosure (parent, child, depth)
     SELECT userId, friendId, depth
-    FROM PopulateClosure WHERE userId != friendId;
+    FROM PopulateFriendsClosure WHERE userId != friendId;
   `)
 
   console.log("Ready.");
@@ -115,7 +115,7 @@ const search = async (req, res) => {
   try {
     const results = await db.all(
       `
-    WITH RECURSIVE BarNameUsers AS (
+    WITH RECURSIVE MatchedUsers AS (
         SELECT id
         FROM Users
         WHERE name LIKE ?
@@ -124,14 +124,14 @@ const search = async (req, res) => {
             SELECT parent, child, depth
             FROM FriendsClosure
             WHERE depth <= 4 AND parent = ? AND child IN (
-                SELECT id FROM BarNameUsers
+                SELECT id FROM MatchedUsers
             )
             UNION
-            SELECT c.parent, ct.child, c.depth + 1
+            SELECT c.parent, fc.child, c.depth + 1
             FROM Connections c
-            JOIN FriendsClosure ct ON c.child = ct.parent
-            WHERE c.depth <  4 AND ct.child IN (
-                SELECT id FROM BarNameUsers
+            JOIN FriendsClosure fc ON c.child = fc.parent
+            WHERE c.depth <=  4 AND fc.child IN (
+                SELECT id FROM MatchedUsers
             )
         )
           SELECT u.id, u.name, MIN(c.depth) as connection FROM Connections c
@@ -164,17 +164,17 @@ const friend = async (req, res) =>{
     await db.run(`INSERT INTO Friends (userId, friendId) VALUES (?, ?), (?, ?);`, [userId, friendId, friendId, userId]);
       
       await db.run(`
-        WITH RECURSIVE NewFriendship AS (
+        WITH RECURSIVE Friendship AS (
           SELECT ? AS parent, ? AS child, 1 AS depth
           UNION ALL
-          SELECT nf.parent, f.friendId AS child, nf.depth + 1
-          FROM NewFriendship nf
-          JOIN Friends f ON nf.child = f.userId
-          WHERE nf.depth < 4
+          SELECT fp.parent, f.friendId AS child, fp.depth + 1
+          FROM Friendship fp
+          JOIN Friends f ON fp.child = f.userId
+          WHERE fp.depth < 4
       )
       INSERT INTO FriendsClosure (parent, child, depth)
       SELECT parent, child, depth
-      FROM NewFriendship;
+      FROM Friendship;
       `, [userId, friendId]);
 
     await db.run('COMMIT;');
@@ -206,14 +206,14 @@ const unFriend = async (req, res) =>{
         WHERE (userId = ? AND friendId = ?) OR (userId = ? AND friendId = ?);
     `, [userId, friendId, friendId, userId]);
       await db.run(`
-        WITH AffectedRows AS (
+        WITH DeletedRows AS (
             SELECT parent, child
             FROM FriendsClosure
             WHERE (parent = ? AND child = ?)
               OR (parent = ? AND child = ?)
         )
         DELETE FROM FriendsClosure
-        WHERE (parent, child) IN (SELECT parent, child FROM AffectedRows);
+        WHERE (parent, child) IN (SELECT parent, child FROM DeletedRows);
       `, [userId, friendId, friendId, userId]);
     await db.run('COMMIT;');
     res.statusCode = 200;
