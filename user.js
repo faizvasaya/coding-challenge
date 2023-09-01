@@ -76,6 +76,9 @@ const search = async (req, res) => {
    * 
    * Finally, in the main query, we are searching the users by name and assigning 0 for the connections
    * which are not a 1st and 2nd level connections as they don't exist in minimumConnectionLevels.
+   * 
+   * NOTE: In order to get it for more levels of connections, replace `cl.level < 2` with `cl.level < 3` or 
+   * `cl.level < 4`
    */
   try {
     const results = await db.all(
