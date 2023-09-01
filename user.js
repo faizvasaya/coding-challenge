@@ -13,31 +13,11 @@ const init = async () => {
       FOREIGN KEY (userId) REFERENCES Users(id),
       FOREIGN KEY (friendId) REFERENCES Users(id)
     );`);
-  // @change: Create a table to store user relationships along with its connection levels. This is the trick to optimize search queries
-  await db.run(`
-    CREATE TABLE UserConnections (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      userId INT,
-      friendId INT,
-      connectionLevel INT,
-      FOREIGN KEY (userId) REFERENCES Users(id),
-      FOREIGN KEY (friendId) REFERENCES Users(id)
-  );`);
-  // @change: Created B-tree Index for efficient 1st and 2nd level connection search
-  await db.run('CREATE INDEX idx_friends_userId_friendId ON Friends(userId, friendId);');
   // @change: Created B-tree Index for efficient name based search
   await db.run('CREATE INDEX idx_users_name ON Users(name);');
-  // @change: Created B-tree Index for efficient search
-  await db.run('CREATE INDEX idx_userconnections_userId_friendId ON UserConnections(userId, friendId);');
-  // @change: Created B-tree Index for efficient search
-  await db.run('CREATE INDEX idx_userconnections_userId_connectionLevel ON UserConnections(userId, connectionLevel);');
-  // @change: Created B-tree Index for efficient search
-  await db.run('CREATE INDEX idx_userconnections_userId_friendId_connectionLevel ON UserConnections(userId, friendId, connectionLevel);');
 
   const users = [];
   const names = ['foo', 'bar', 'baz'];
-  // Loading for 27000 users would take around 2 hours. May also crash your system
-  // hence try with 500 or 1K users first to check the implementation.
   for (i = 0; i < 27000; ++i) {
     let n = i;
     let name = '';
@@ -68,35 +48,8 @@ const init = async () => {
   await Promise.all(users.map((un) => db.run(`INSERT INTO Users (name) VALUES ('${un}');`)));
   console.log("Init Friends Table...");
   await Promise.all(friends.map((list, i) => {
-    return Promise.all(
-      list.map((j) =>{
-          return db.run(`INSERT INTO Friends (userId, friendId) VALUES (${i + 1}, ${j + 1});`);
-        }));
+    return Promise.all(list.map((j) => db.run(`INSERT INTO Friends (userId, friendId) VALUES (${i + 1}, ${j + 1});`)));
   }));
-
-  // @change: Load 1st level connections in UserConnections table
-  await Promise.all(friends.map((list, i) => {
-    return Promise.all(
-      list.map((j) =>{
-          return  db.run(`INSERT INTO UserConnections (userId, friendId, connectionLevel) VALUES (${i + 1}, ${j + 1}, 1);`);
-        }));
-  }));
-
-  // @change: Load 2nd level connections in UserConnections table. This consumes a lot of time
-  await Promise.all(friends.map((list, i) => {
-    return Promise.all(
-      list.map((j) =>{
-        return db.run(`
-        INSERT INTO UserConnections (userId, friendId, connectionLevel)
-        SELECT ${i + 1}, friendId, 2
-        FROM UserConnections
-        WHERE userId = ${j + 1} AND connectionLevel = 1 AND friendId NOT IN (
-          SELECT friendId from UserConnections WHERE userId = ${i + 1}
-        ) AND friendId != ${i + 1};
-    `);
-    }));
-  }));
-
   console.log("Ready.");
 }
 module.exports.init = init;
@@ -109,17 +62,48 @@ const search = async (req, res) => {
   const query = req.params.query;
   const userId = parseInt(req.params.userId);
 
+  /**
+   * Explanation of search query
+   * The connectionLevels is a recursive Common Table Expression which has a base condition
+   * of all the friends who are a friend of user who is searching. Friends found in the base
+   * condition are assigned a level of 1.
+   * The recursive query in the CTE fetches the friends of each friend found in base condition
+   * and assigns it a level of 2. The recursion stops at level 2 and it serves as an exit condition.
+   * 
+   * Now, there could be a possibility where the same friend is a 1st level and a 2nd level connection.
+   * In order to tackle that scenario, the minimumConnectionLevels CTE further groups the users by id
+   * and selects on the minimum level for each of the friends of the user.
+   * 
+   * Finally, in the main query, we are searching the users by name and assigning 0 for the connections
+   * which are not a 1st and 2nd level connections as they don't exist in minimumConnectionLevels.
+   */
   try {
     const results = await db.all(
       `
-      SELECT u.id, u.name,
-      COALESCE(
-        (SELECT connectionLevel FROM UserConnections WHERE userId = ? AND friendId = u.id),
-        0
-      ) AS connection
-      FROM Users u
-      WHERE u.name LIKE ?;
-      `
+      WITH RECURSIVE connectionLevels AS (
+        SELECT friendId AS id, 1 AS level
+        FROM Friends
+        WHERE userId = ?
+    
+        UNION ALL
+
+        SELECT f.friendId AS id, cl.level + 1 AS level
+        FROM connectionLevels cl, Friends f
+        WHERE f.userId = cl.id AND cl.level < 2
+    ),
+    minimumConnectionLevels AS (
+        SELECT id, MIN(level) AS level
+        FROM connectionLevels
+        GROUP BY id
+    )
+    SELECT id, name,
+        CASE
+            WHEN (SELECT level FROM minimumConnectionLevels WHERE id = Users.id) IS NULL THEN 0
+            ELSE (SELECT level FROM minimumConnectionLevels WHERE id = Users.id)
+        END AS connection
+    FROM Users
+    WHERE name LIKE ?;
+    `
     , [userId, `${query}%`]);
     res.statusCode = 200;
     res.json({
@@ -127,6 +111,7 @@ const search = async (req, res) => {
       users: results
     });
   } catch(err) {
+    console.log(err);
     res.statusCode = 500;
     res.json({ success: false, error: err });
   }
@@ -140,34 +125,7 @@ const friend = async (req, res) =>{
 
   try{
     await db.run('BEGIN TRANSACTION;');
-      // Add the 1st level connections
       await db.run(`INSERT INTO Friends (userId, friendId) VALUES (?, ?), (?, ?);`, [userId, friendId, friendId, userId]);
-      // Delete all 2nd level connection of A to B
-      await db.run(`DELETE FROM UserConnections 
-          WHERE (userId = ? AND friendId = ? AND connectionLevel != 1) 
-          OR (userId = ? AND friendId = ? AND connectionLevel != 1);
-          `, [userId, friendId, friendId, userId]);
-      // Insert 1st level connection between A -> B and B -> A
-      await db.run(`INSERT INTO UserConnections (userId, friendId, connectionLevel) 
-                      VALUES (?, ?, ?), (?, ?, ?);`, [userId, friendId, 1, friendId, userId, 1]);
-
-      // Add the 2nd level connections between A and B
-      await db.run(`
-          INSERT INTO UserConnections (userId, friendId, connectionLevel)
-          SELECT ?, friendId, 2
-          FROM UserConnections
-          WHERE userId = ? AND connectionLevel = 1 AND friendId NOT IN (
-            SELECT friendId from UserConnections WHERE userId = ?
-          ) AND friendId != ?
-          UNION ALL
-          SELECT ?, friendId, 2
-          FROM UserConnections
-          WHERE userId = ? AND connectionLevel = 1 AND friendId NOT IN (
-            SELECT friendId from UserConnections WHERE userId = ?
-          ) AND friendId != ?;
-      `, [userId, friendId, userId, userId,
-          friendId, userId, friendId, friendId]);
-
     await db.run('COMMIT;');
     res.statusCode = 200;
     res.json({
@@ -192,50 +150,10 @@ const unFriend = async (req, res) =>{
 
   try{
     await db.run('BEGIN TRANSACTION;');
-    // Remove the 1st level connection
-    await db.run(`
+      await db.run(`
         DELETE FROM Friends 
         WHERE (userId = ? AND friendId = ?) OR (userId = ? AND friendId = ?);
     `, [userId, friendId, friendId, userId]);
-
-    // Remove the 1st level connection
-    await db.run(`DELETE FROM UserConnections
-        WHERE (userId = ? AND friendId = ? AND connectionLevel = 1) 
-        OR (userId = ? AND friendId = ? AND connectionLevel = 1);
-    `,[userId, friendId, friendId, userId]);
-
-    // Find such B's 1st level connections which are a second level connections with A and delete them
-    // Find such A's 1st level connections which are a second level connections with B and delete them
-    // This is time consuming. In real world we can make it async
-    await db.run(`
-        DELETE FROM UserConnections
-        WHERE (userId = ? 
-          AND friendId IN (SELECT friendId FROM UserConnections WHERE userId = ? AND connectionLevel = 1) 
-          AND connectionLevel = 2
-        )
-        OR (userId = ? 
-          AND friendId IN (SELECT friendId FROM UserConnections WHERE userId = ? AND connectionLevel = 1)
-          AND connectionLevel = 2);
-    `, [userId, friendId, friendId, userId]);  
-
-    // Reestablish 2nd level connections of A and B
-    await db.run(`
-        INSERT INTO UserConnections (userId, friendId, connectionLevel) 
-        SELECT DISTINCT(friendId), ?, 2 FROM UserConnections
-            WHERE friendId NOT IN (
-                SELECT friendId FROM UserConnections WHERE userId = ?
-            ) AND friendId != ?;
-    `, [friendId, friendId, friendId]);
-    
-    // Reestablish 2nd level connections of B and A
-    await db.run(`
-        INSERT INTO UserConnections (userId, friendId, connectionLevel)
-        SELECT DISTINCT(friendId), ?, 2 FROM UserConnections
-            WHERE friendId NOT IN (
-                SELECT friendId FROM UserConnections WHERE userId = ?
-            ) AND friendId != ?;
-    `, [userId, userId, userId]); 
-    
     await db.run('COMMIT;');
     res.statusCode = 200;
     res.json({
