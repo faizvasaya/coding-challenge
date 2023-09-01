@@ -78,7 +78,10 @@ const search = async (req, res) => {
    * which are not a 1st and 2nd level connections as they don't exist in minimumConnectionLevels.
    * 
    * NOTE: In order to get it for more levels of connections, replace `cl.level < 2` with `cl.level < 3` or 
-   * `cl.level < 4`
+   * `cl.level < 4`. However, increasing the levels will degrade the performance due to increase in recursion levels.
+   * I would prefer using the closure table approach for fetching 3rd and 4th. In closure table approach we would 
+   * readily store each users connection and their minimum levels of connections with each user so that it could 
+   * be fetched directly without recursions.
    */
   try {
     const results = await db.all(
